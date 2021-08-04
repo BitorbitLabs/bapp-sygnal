@@ -211,6 +211,8 @@ class ApnsPushkin(ConcurrencyLimitedPushkin):
         except aioapns.ConnectionError:
             raise TemporaryNotificationDispatchException("aioapns Connection Failure")
 
+        log.info(f"Request", request)
+        log.info(f"Response", response)
         code = int(response.status)
 
         span.set_tag(tags.HTTP_STATUS_CODE, code)
