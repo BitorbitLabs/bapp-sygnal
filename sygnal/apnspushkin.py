@@ -455,13 +455,11 @@ class ApnsPushkin(ConcurrencyLimitedPushkin):
 
         payload.setdefault("aps", {})
 
-        payload["aps"]["alert"] = "You have a new message"
+        if loc_key:
+            payload["aps"].setdefault("alert", {})["loc-key"] = loc_key
 
-        # if loc_key:
-        #     payload["aps"].setdefault("alert", {})["loc-key"] = loc_key
-        #
-        # if loc_args:
-        #     payload["aps"].setdefault("alert", {})["loc-args"] = loc_args
+        if loc_args:
+            payload["aps"].setdefault("alert", {})["loc-args"] = loc_args
 
         if badge is not None:
             payload["aps"]["badge"] = badge
