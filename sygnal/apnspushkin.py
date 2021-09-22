@@ -196,11 +196,6 @@ class ApnsPushkin(ConcurrencyLimitedPushkin):
 
         device_token = base64.b64decode(device.pushkey).hex()
 
-        log.info(f"shaved_payload", shaved_payload)
-        pld = json.dumps(shaved_payload, separators=(',', ':'))
-        log.info(f"payload json", pld)
-
-
         request = NotificationRequest(
             device_token=device_token,
             message=shaved_payload,
@@ -250,7 +245,6 @@ class ApnsPushkin(ConcurrencyLimitedPushkin):
 #                "Is not text message"
 #             ) from exc
 
-        log.info(f"_dispatch_notification_unlimited => n", n)
         # The pushkey is kind of secret because you can use it to send push
         # to someone.
         # span_tags = {"pushkey": device.pushkey}
@@ -262,10 +256,8 @@ class ApnsPushkin(ConcurrencyLimitedPushkin):
 
             if n.event_id and not n.type:
                 payload = self._get_payload_event_id_only(n, device)
-                log.info(f"_dispatch_notification_unlimited => event_id => payload", payload)
             else:
                 payload = self._get_payload_full(n, device, log)
-                log.info(f"_dispatch_notification_unlimited => payload", payload)
 
             if payload is None:
                 # Nothing to do
@@ -468,8 +460,7 @@ class ApnsPushkin(ConcurrencyLimitedPushkin):
 
         payload.setdefault("aps", {})
 
-        if n.content and n.content["body"]:
-            payload["aps"]["alert"] = n.content["body"]
+        payload["aps"]["alert"] = "You have a new message"
 
 #         if loc_key:
 #             payload["aps"].setdefault("alert", {})["loc-key"] = loc_key
