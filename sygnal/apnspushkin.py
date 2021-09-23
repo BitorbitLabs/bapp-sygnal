@@ -455,9 +455,11 @@ class ApnsPushkin(ConcurrencyLimitedPushkin):
 
         payload.setdefault("aps", {})
 
-        if n.type == "m.room.message":
-            if n.content and "body" in n.content:
-                payload["aps"]["alert"] = n.content["body"]
+        log.info(f"n.content.body, {n.content["body"]}")
+        log.info(f"n.content.body, {n.type}")
+
+        if n.content and "body" in n.content:
+            payload["aps"]["alert"] = n.content["body"]
 
         # if loc_key:
         #     payload["aps"].setdefault("alert", {})["loc-key"] = loc_key
