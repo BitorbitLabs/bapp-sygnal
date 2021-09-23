@@ -455,8 +455,7 @@ class ApnsPushkin(ConcurrencyLimitedPushkin):
 
         payload.setdefault("aps", {})
 
-        log.info(f"n.content.body, {n.type}")
-        log.info(f"n.content.body, {n.content}")
+        log.info(f"n.content.body, {n}")
 
         if n.content and "body" in n.content:
             payload["aps"]["alert"] = n.content["body"]
