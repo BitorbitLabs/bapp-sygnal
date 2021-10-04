@@ -458,7 +458,7 @@ class ApnsPushkin(ConcurrencyLimitedPushkin):
         if n.type == "m.room.message":
             if n.content and "body" in n.content:
                 if n.content["body"]:
-                    payload["aps"]["alert"]["body"] = n.content["body"][:65];
+                    payload["aps"]["alert"]["body"] = n.content["body"][:65]
                     if "sender_display_name" in n:
                         payload["aps"]["alert"]["title"] = n["sender_display_name"]
                 else:
