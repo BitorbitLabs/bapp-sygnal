@@ -457,12 +457,13 @@ class ApnsPushkin(ConcurrencyLimitedPushkin):
 
         if n.type == "m.room.message":
             if n.content and "body" in n.content:
+                payload["aps"]["mutable-content"] = 1
                 if n.content["body"]:
-                    payload["title"] = n.sender_display_name
-                    payload["aps"]["alert"] = n.content["body"][:65]
+                    payload["aps"]["alert"]["title"] = n.sender_display_name
+                    payload["aps"]["alert"]["body"] = n.content["body"][:65]
                 else:
-                    payload["title"] = n.sender_display_name
-                    payload["aps"]["alert"] = "You have a new message"
+                    payload["aps"]["alert"]["title"] = n.sender_display_name
+                    payload["aps"]["alert"]["body"] = "You have a new message"
 
         # if loc_key:
         #     payload["aps"].setdefault("alert", {})["loc-key"] = loc_key
