@@ -26,7 +26,8 @@ RUN pip install --prefix="/install" --no-warn-script-location cryptography
 
 COPY . /sygnal/
 
-RUN pip install --prefix="/install" --no-warn-script-location /sygnal
+RUN pip install --prefix="/install" --no-warn-script-location /sygnal \
+    && pip install --prefix="/install" --no-warn-script-location aioapns==2.0.2
 
 ###
 ### Stage 1: runtime
