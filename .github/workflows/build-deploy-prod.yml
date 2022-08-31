@@ -4,7 +4,7 @@ on:
     branches: [main]
 
 env: 
-  APP_NAME: bitorbit-synapse
+  APP_NAME: bitorbit-sygnal
   REPO: ${{ secrets.GAR_PROD }}/${{ secrets.GCP_PROD_PROJECT }}/docker
   IMAGE_TAG: ${{ github.sha }}
   BRANCH_NAME: ${{ github.ref_name }}
