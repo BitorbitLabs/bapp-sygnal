@@ -14,13 +14,10 @@
 # limitations under the License.
 import json
 from io import BytesIO
-from os import environ
 from threading import Condition
-from time import time_ns
 from typing import BinaryIO, Dict, List, Optional, Union
 
 import attr
-import psycopg2
 from twisted.internet._resolver import SimpleResolverComplexifier
 from twisted.internet.defer import ensureDeferred, fail, succeed
 from twisted.internet.error import DNSLookupError
@@ -35,56 +32,10 @@ from sygnal.sygnal import CONFIG_DEFAULTS, Sygnal, merge_left_with_defaults
 
 REQ_PATH = b"/_matrix/push/v1/notify"
 
-USE_POSTGRES = environ.get("TEST_USE_POSTGRES", False)
-# the dbname we will connect to in order to create the base database.
-POSTGRES_DBNAME_FOR_INITIAL_CREATE = "postgres"
-POSTGRES_USER = environ.get("TEST_POSTGRES_USER", None)
-POSTGRES_PASSWORD = environ.get("TEST_POSTGRES_PASSWORD", None)
-POSTGRES_HOST = environ.get("TEST_POSTGRES_HOST", None)
-
 
 class TestCase(unittest.TestCase):
     def config_setup(self, config):
-        self.dbname = "_sygnal_%s" % (time_ns())
-        if USE_POSTGRES:
-            config["database"] = {
-                "name": "psycopg2",
-                "args": {
-                    "user": POSTGRES_USER,
-                    "password": POSTGRES_PASSWORD,
-                    "database": self.dbname,
-                    "host": POSTGRES_HOST,
-                },
-            }
-        else:
-            config["database"] = {"name": "sqlite3", "args": {"dbfile": ":memory:"}}
-
-    def _set_up_database(self, dbname):
-        conn = psycopg2.connect(
-            database=POSTGRES_DBNAME_FOR_INITIAL_CREATE,
-            user=POSTGRES_USER,
-            password=POSTGRES_PASSWORD,
-            host=POSTGRES_HOST,
-        )
-        conn.autocommit = True
-        cur = conn.cursor()
-        cur.execute("DROP DATABASE IF EXISTS %s;" % (dbname,))
-        cur.execute("CREATE DATABASE %s;" % (dbname,))
-        cur.close()
-        conn.close()
-
-    def _tear_down_database(self, dbname):
-        conn = psycopg2.connect(
-            database=POSTGRES_DBNAME_FOR_INITIAL_CREATE,
-            user=POSTGRES_USER,
-            password=POSTGRES_PASSWORD,
-            host=POSTGRES_HOST,
-        )
-        conn.autocommit = True
-        cur = conn.cursor()
-        cur.execute("DROP DATABASE %s;" % (dbname,))
-        cur.close()
-        conn.close()
+        pass
 
     def setUp(self):
         reactor = ExtendedMemoryReactorClock()
@@ -123,31 +74,22 @@ class TestCase(unittest.TestCase):
         self.config_setup(config)
 
         config = merge_left_with_defaults(CONFIG_DEFAULTS, config)
-        if USE_POSTGRES:
-            self._set_up_database(self.dbname)
 
-        self.sygnal = Sygnal(config, reactor)
+        self.sygnal = Sygnal(config, reactor)  # type: ignore[arg-type]
         self.reactor = reactor
-        self.sygnal.database.start()
 
         start_deferred = ensureDeferred(self.sygnal.make_pushkins_then_start())
 
         while not start_deferred.called:
             # we need to advance until the pushkins have started up
-            self.sygnal.reactor.advance(1)
-            self.sygnal.reactor.wait_for_work(lambda: start_deferred.called)
+            self.reactor.advance(1)
+            self.reactor.wait_for_work(lambda: start_deferred.called)
 
         # sygnal should have started a single (fake) tcp listener
         listeners = self.reactor.tcpServers
         self.assertEqual(len(listeners), 1)
         (port, site, _backlog, interface) = listeners[0]
         self.site = site
-
-    def tearDown(self):
-        super().tearDown()
-        self.sygnal.database.close()
-        if USE_POSTGRES:
-            self._tear_down_database(self.dbname)
 
     def _make_dummy_notification(self, devices):
         return {
@@ -212,8 +154,8 @@ class TestCase(unittest.TestCase):
 
         while not channel.done:
             # we need to advance until the request has been finished
-            self.sygnal.reactor.advance(1)
-            self.sygnal.reactor.wait_for_work(lambda: channel.done)
+            self.reactor.advance(1)
+            self.reactor.wait_for_work(lambda: channel.done)
 
         assert channel.done
         assert channel.result is not None
@@ -257,6 +199,7 @@ class TestCase(unittest.TestCase):
 
         while not all_channels_done():
             # we need to advance until the request has been finished
+            assert isinstance(self.sygnal.reactor, ExtendedMemoryReactorClock)
             self.sygnal.reactor.advance(1)
             self.sygnal.reactor.wait_for_work(all_channels_done)
 
@@ -278,7 +221,7 @@ class ExtendedMemoryReactorClock(MemoryReactorClock):
         self.lookups: Dict[str, str] = {}
 
         @implementer(IResolverSimple)
-        class FakeResolver(object):
+        class FakeResolver:
             @staticmethod
             def getHostByName(name, timeout=None):
                 if name not in self.lookups:
@@ -327,7 +270,7 @@ class ExtendedMemoryReactorClock(MemoryReactorClock):
             self.work_notifier.release()
 
 
-class DummyResponse(object):
+class DummyResponse:
     def __init__(self, code):
         self.code = code
 
@@ -350,7 +293,7 @@ class HTTPResult:
 
 
 @attr.s
-class FakeChannel(object):
+class FakeChannel:
     """
     A fake Twisted Web Channel (the part that interfaces with the
     wire).

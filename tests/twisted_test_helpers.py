@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 @attr.s(cmp=False)
-class FakeTransport(object):
+class FakeTransport:
     """
     A twisted.internet.interfaces.ITransport implementation which sends all its data
     straight into an IProtocol object: it exists to connect two IProtocols together.
@@ -274,7 +274,7 @@ def create_test_cert_file(sanlist):
 
 
 @implementer(IOpenSSLServerConnectionCreator)
-class TestServerTLSConnectionFactory(object):
+class TestServerTLSConnectionFactory:
     """An SSL connection creator which returns connections which present a certificate
     signed by our test CA."""
 
@@ -286,7 +286,7 @@ class TestServerTLSConnectionFactory(object):
         self._cert_file = create_test_cert_file(sanlist)
 
     def serverConnectionForTLS(self, tlsProtocol):
-        ctx = SSL.Context(SSL.TLSv1_METHOD)
+        ctx = SSL.Context(SSL.SSLv23_METHOD)
         ctx.use_certificate_file(self._cert_file)
         ctx.use_privatekey_file(get_test_key_file())
         return Connection(ctx, None)

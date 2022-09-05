@@ -1,3 +1,119 @@
+Sygnal 0.12.0 (2022-07-04)
+==========================
+
+Features
+--------
+
+- Add a new `push_type` configuration option for APNs apps, to control the value of the `apns-push-type` header when sending requests. ([\#309](https://github.com/matrix-org/sygnal/issues/309))
+
+
+Bugfixes
+--------
+
+- Fix a bug introduced in Sygnal 0.7.0 where a malformed `default_payload` could cause an internal server error. ([\#292](https://github.com/matrix-org/sygnal/issues/292))
+
+
+Improved Documentation
+----------------------
+
+- Document the use of an iOS Notification Service Extension and the Push Gateway API as a workaround to trigger VoIP notifications on iOS. ([\#285](https://github.com/matrix-org/sygnal/issues/285))
+- Add a link to the docker image in the README. ([\#297](https://github.com/matrix-org/sygnal/issues/297))
+
+
+Internal Changes
+----------------
+
+- Avoid a breaking change in aioapns 2.1 by requiring an earlier version of that package. ([\#294](https://github.com/matrix-org/sygnal/issues/294))
+- Fix test failures by using the latest versions of TLS in the TLS proxy tests. ([\#306](https://github.com/matrix-org/sygnal/issues/306))
+- Update the `black` code formatter to 22.3.0. ([\#307](https://github.com/matrix-org/sygnal/issues/307))
+
+
+Sygnal 0.11.0 (2021-12-15)
+==========================
+
+Bugfixes
+--------
+
+- Fix a bug introduced in Sygnal 0.5.0 where pushkin names would match substrings of app IDs and treat dots as wildcards. ([\#269](https://github.com/matrix-org/sygnal/issues/269))
+- Fix a bug introduced in Sygnal 0.5.0 where GCM pushes would always fail when configured to handle an app ID glob. ([\#270](https://github.com/matrix-org/sygnal/issues/270))
+- Treat more APNs errors as permanent rejections. ([\#280](https://github.com/matrix-org/sygnal/issues/280))
+- Fix a bug introduced in Sygnal 0.9.1 where web pushkeys with missing endpoints would cause an error. ([\#288](https://github.com/matrix-org/sygnal/issues/288))
+
+
+Improved Documentation
+----------------------
+
+- Document that the `topic` is most commonly the Bundle Identifier for the iOS application. ([\#284](https://github.com/matrix-org/sygnal/issues/284))
+- Add troubleshooting documentation for when you receive 'Could not deserialize key data' when using APNs with key files. ([\#286](https://github.com/matrix-org/sygnal/issues/286))
+
+
+Internal Changes
+----------------
+
+- Fix the changelog CI check when running on a fork of the Sygnal repository, rather than a branch. ([\#254](https://github.com/matrix-org/sygnal/issues/254))
+- Configure @matrix-org/synapse-core to be the code owner for the repository. ([\#259](https://github.com/matrix-org/sygnal/issues/259))
+- Improve static type checking. ([\#264](https://github.com/matrix-org/sygnal/issues/264))
+- Use absolute imports for consistency. ([\#265](https://github.com/matrix-org/sygnal/issues/265))
+- Remove explicit inheritance from `object` that was left over from Python 2. ([\#266](https://github.com/matrix-org/sygnal/issues/266))
+- Use Python 3-style super calls. ([\#267](https://github.com/matrix-org/sygnal/issues/267))
+- Add type hints to most of the code. ([\#271](https://github.com/matrix-org/sygnal/issues/271), [\#273](https://github.com/matrix-org/sygnal/issues/273), [\#274](https://github.com/matrix-org/sygnal/issues/274), [\#275](https://github.com/matrix-org/sygnal/issues/275), [\#276](https://github.com/matrix-org/sygnal/issues/276))
+- Convert the README to use markdown rather than reStructuredText for consistency and familiarity. ([\#278](https://github.com/matrix-org/sygnal/issues/278))
+- Move `glob_to_regex` to `matrix-python-common`. ([\#281](https://github.com/matrix-org/sygnal/issues/281))
+- Add `opentracing-types` to the dev dependencies. ([\#287](https://github.com/matrix-org/sygnal/issues/287))
+- Add missing dependencies to `setup.py`. ([\#290](https://github.com/matrix-org/sygnal/issues/290))
+
+
+Sygnal 0.10.1 (2021-08-16)
+==========================
+
+This release only makes changes to the way Docker images are built and released; it is otherwise identical to 0.10.0. Administrators who do not use Docker as their installation method have no need to upgrade from 0.10.0.
+
+
+Updates to the Docker image
+---------------------------
+
+- Fix the docker image build from failing due to `git` not being installed. This issue was introduced in v0.10.0. ([\#246](https://github.com/matrix-org/sygnal/issues/246))
+- CI now checks that the Docker image still builds after the Dockerfile is modified. ([\#248](https://github.com/matrix-org/sygnal/issues/248))
+- Automatically build the Docker image for each release and push it to Docker Hub using GitHub Actions. ([\#249](https://github.com/matrix-org/sygnal/issues/249))
+
+
+Internal Changes
+----------------
+
+- Add a lint script (scripts-dev/lint.sh) for developers. ([\#243](https://github.com/matrix-org/sygnal/issues/243))
+- Add more comprehensive Newsfile (changelog fragment) checks in CI. ([\#250](https://github.com/matrix-org/sygnal/issues/250))
+
+
+Sygnal 0.10.0 (2021-08-09)
+==========================
+
+Database Removal
+----------------
+
+Sygnal is now stateless, and does not rely on a database of any kind.
+You may remove your existing SQLite or PostgreSQL databases once you are satisfied that this release is working as intended.
+Configuration changes are not necessary, as the `database` section will be ignored if present.
+
+- Remove legacy database to ease horizontal scaling. Contributed by H. Shay. ([\#236](https://github.com/matrix-org/sygnal/issues/236))
+
+
+Improved Documentation
+----------------------
+
+- Update CONTRIBUTING.md to recommend installing libpq-dev. Contributed by Tawanda Moyo. ([\#197](https://github.com/matrix-org/sygnal/issues/197))
+
+
+Internal Changes
+----------------
+
+- Improve static type checking. Contributed by Omar Mohamed. ([\#221](https://github.com/matrix-org/sygnal/issues/221), [\#223](https://github.com/matrix-org/sygnal/issues/223), [\#225](https://github.com/matrix-org/sygnal/issues/225), [\#227](https://github.com/matrix-org/sygnal/issues/227))
+- Update towncrier CI check to run against the new default branch name. ([\#226](https://github.com/matrix-org/sygnal/issues/226))
+- Update black to 21.6b0. ([\#233](https://github.com/matrix-org/sygnal/issues/233))
+- Fix type hint errors from new upstream Twisted release. ([\#239](https://github.com/matrix-org/sygnal/issues/239))
+- Fixup GitHub Actions pipeline to always run tests on PRs. ([\#240](https://github.com/matrix-org/sygnal/issues/240))
+- Add CI testing for old dependencies. ([\#242](https://github.com/matrix-org/sygnal/issues/242))
+
+
 Sygnal 0.9.3 (2021-04-22)
 =========================
 

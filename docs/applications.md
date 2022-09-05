@@ -175,6 +175,40 @@ An example `data` dictionary to specify on `POST /_matrix/client/r0/pushers/set`
 [APNs documentation]: https://developer.apple.com/library/archive/documentation/NetworkingInternet/Conceptual/RemoteNotificationsPG/CreatingtheNotificationPayload.html
 
 
+#### VoIP (voice calls and video calls) notifications on iOS
+
+iOS is capable of displaying an on-screen call notification (with answer/deny buttons)
+and playing a ringtone.
+
+However, this requires sending a special kind of push notification.
+Sygnal is not able to send this type of push notification because a VoIP call may
+begin as a result of an encrypted message, so Sygnal has no way to know that a given
+message should initiate a VoIP call.
+
+
+##### Recent iOS (≥ 14.5) versions
+
+As of iOS 14.5, your iOS application can register a Notification Service Extension that,
+upon receiving a relevant VoIP notification, calls [`reportNewIncomingVoIPPushPayload`][iOSReportVoIP]
+to trigger a VoIP notification display on the device.
+
+[iOSReportVoIP]: https://developer.apple.com/documentation/callkit/cxprovider/3727263-reportnewincomingvoippushpayload
+
+
+##### Old iOS (< 14.5) versions
+
+For old iOS versions, a workaround is for your iOS application to register a Notification Service Extension
+that, upon receiving a relevant VoIP notification, makes an HTTP request to Sygnal's
+[`/_matrix/push/v1/notify`](https://spec.matrix.org/latest/push-gateway-api/#post_matrixpushv1notify)
+endpoint in order to trigger the correct type of notification.
+(There was no interface to do this on-device.)
+
+The Notification Service Extension of *Element iOS*, [available here][ElementNSE],
+may be useful for reference.
+
+[ElementNSE]: https://github.com/vector-im/element-ios/blob/034e253fb19092ef16b5262293d5c32db96aec22/RiotNSE/NotificationService.swift
+
+
 ### Firebase Cloud Messaging
 
 The client will receive a message with an FCM `data` payload with this structure:
@@ -247,7 +281,7 @@ In your web application, [the push manager subscribe method](https://developer.m
 will return
 [a subscription](https://developer.mozilla.org/en-US/docs/Web/API/PushSubscription) 
 with an `endpoint` and `keys` property, the latter containing a `p256dh` and `auth` 
-property. The `p256dh` key is used as the push key, and the push data is expected 
+property. The `p256dh` key is used as the push key, and the push data must contain
 `endpoint` and `auth`. You can also set `default_payload` in the push data;
 any properties set in it will be present in the push messages you receive, 
 so it can be used to pass identifiers specific to your client

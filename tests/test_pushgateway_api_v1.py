@@ -79,7 +79,7 @@ class PushGatewayApiV1TestCase(testutils.TestCase):
         """
         Set up a TestPushkin for the test.
         """
-        super(PushGatewayApiV1TestCase, self).config_setup(config)
+        super().config_setup(config)
         config["apps"]["com.example.spqr"] = {
             "type": "tests.test_pushgateway_api_v1.TestPushkin"
         }
@@ -192,7 +192,7 @@ class PushGatewayApiV1TestCase(testutils.TestCase):
 
         # connect the site to a fake transport.
         transport = StringTransport()
-        protocol = self.site.buildProtocol(IPv6Address("TCP", "::1", "2345"))
+        protocol = self.site.buildProtocol(IPv6Address("TCP", "::1", 2345))
         protocol.makeConnection(transport)
 
         protocol.dataReceived(
@@ -209,7 +209,7 @@ class PushGatewayApiV1TestCase(testutils.TestCase):
 
         # now send an oversized request
         transport = StringTransport()
-        protocol = self.site.buildProtocol(IPv6Address("TCP", "::1", "2345"))
+        protocol = self.site.buildProtocol(IPv6Address("TCP", "::1", 2345))
         protocol.makeConnection(transport)
 
         protocol.dataReceived(

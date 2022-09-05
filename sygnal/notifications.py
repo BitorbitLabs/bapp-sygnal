@@ -14,58 +14,74 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import typing
-from typing import Any, Dict, List, Optional
+import abc
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Type, TypeVar, overload
 
+from matrix_common.regex import glob_to_regex
+from opentracing import Span
 from prometheus_client import Counter
 
-from .exceptions import InvalidNotificationException, NotificationDispatchException
+from sygnal.exceptions import (
+    InvalidNotificationException,
+    NotificationDispatchException,
+    PushkinSetupException,
+)
 
-if typing.TYPE_CHECKING:
-    from .sygnal import Sygnal
+if TYPE_CHECKING:
+    from sygnal.sygnal import Sygnal
+
+T = TypeVar("T")
+
+
+@overload
+def get_key(raw: Dict[str, Any], key: str, type_: Type[T], default: T) -> T:
+    ...
+
+
+@overload
+def get_key(
+    raw: Dict[str, Any], key: str, type_: Type[T], default: None = None
+) -> Optional[T]:
+    ...
+
+
+def get_key(
+    raw: Dict[str, Any], key: str, type_: Type[T], default: Optional[T] = None
+) -> Optional[T]:
+    if key not in raw:
+        return default
+    if not isinstance(raw[key], type_):
+        raise InvalidNotificationException(f"{key} is of invalid type")
+    return raw[key]
 
 
 class Tweaks:
-    def __init__(self, raw):
-        self.sound = None
-
-        if "sound" in raw:
-            self.sound = raw["sound"]
+    def __init__(self, raw: Dict[str, Any]):
+        self.sound: Optional[str] = get_key(raw, "sound", str)
 
 
 class Device:
-    def __init__(self, raw):
-        self.app_id = None
-        self.pushkey = None
-        self.pushkey_ts = 0
-        self.data = None
-        self.tweaks = None
+    def __init__(self, raw: Dict[str, Any]):
+        if "app_id" not in raw or not isinstance(raw["app_id"], str):
+            raise InvalidNotificationException(
+                "Device with missing or non-string app_id"
+            )
+        self.app_id: str = raw["app_id"]
+        if "pushkey" not in raw or not isinstance(raw["pushkey"], str):
+            raise InvalidNotificationException(
+                "Device with missing or non-string pushkey"
+            )
+        self.pushkey: str = raw["pushkey"]
 
-        if "app_id" not in raw:
-            raise InvalidNotificationException("Device with no app_id")
-        if "pushkey" not in raw:
-            raise InvalidNotificationException("Device with no pushkey")
-        if "pushkey_ts" in raw:
-            self.pushkey_ts = raw["pushkey_ts"]
-        if "tweaks" in raw:
-            self.tweaks = Tweaks(raw["tweaks"])
-        else:
-            self.tweaks = Tweaks({})
-        self.app_id = raw["app_id"]
-        self.pushkey = raw["pushkey"]
-        if "data" in raw:
-            self.data = raw["data"]
+        self.pushkey_ts: int = get_key(raw, "pushkey_ts", int, 0)
+        self.data: Optional[Dict[str, Any]] = get_key(raw, "data", dict)
+        self.tweaks = Tweaks(get_key(raw, "tweaks", dict, {}))
 
 
 class Counts:
-    def __init__(self, raw):
-        self.unread = None
-        self.missed_calls = None
-
-        if "unread" in raw:
-            self.unread = raw["unread"]
-        if "missed_calls" in raw:
-            self.missed_calls = raw["missed_calls"]
+    def __init__(self, raw: Dict[str, Any]):
+        self.unread: Optional[int] = get_key(raw, "unread", int)
+        self.missed_calls: Optional[int] = get_key(raw, "missed_calls", int)
 
 
 class Notification:
@@ -94,17 +110,38 @@ class Notification:
         self.devices = [Device(d) for d in notif["devices"]]
 
 
-class Pushkin(object):
+class Pushkin(abc.ABC):
     def __init__(self, name: str, sygnal: "Sygnal", config: Dict[str, Any]):
         self.name = name
+        self.appid_pattern = glob_to_regex(name, ignore_case=False)
         self.cfg = config
         self.sygnal = sygnal
 
-    def get_config(self, key: str, default=None):
+    @overload
+    def get_config(self, key: str, type_: Type[T], default: T) -> T:
+        ...
+
+    @overload
+    def get_config(self, key: str, type_: Type[T], default: None = None) -> Optional[T]:
+        ...
+
+    def get_config(
+        self, key: str, type_: Type[T], default: Optional[T] = None
+    ) -> Optional[T]:
         if key not in self.cfg:
             return default
+        if not isinstance(self.cfg[key], type_):
+            raise PushkinSetupException(
+                f"{key} is of incorrect type, please check that the entry for {key} is "
+                f"formatted correctly in the config file. "
+            )
         return self.cfg[key]
 
+    def handles_appid(self, appid: str) -> bool:
+        """Checks whether the pushkin is responsible for the given app ID"""
+        return self.name == appid or self.appid_pattern.match(appid) is not None
+
+    @abc.abstractmethod
     async def dispatch_notification(
         self, n: Notification, device: Device, context: "NotificationContext"
     ) -> List[str]:
@@ -112,12 +149,12 @@ class Pushkin(object):
         Args:
             n: The notification to dispatch via this pushkin
             device: The device to dispatch the notification for.
-            context (NotificationContext): the request context
+            context: the request context
 
         Returns:
             A list of rejected pushkeys, to be reported back to the homeserver
         """
-        pass
+        ...
 
     @classmethod
     async def create(cls, name: str, sygnal: "Sygnal", config: Dict[str, Any]):
@@ -152,7 +189,7 @@ class ConcurrencyLimitedPushkin(Pushkin):
     )
 
     def __init__(self, name: str, sygnal: "Sygnal", config: Dict[str, Any]):
-        super(ConcurrencyLimitedPushkin, self).__init__(name, sygnal, config)
+        super().__init__(name, sygnal, config)
         self._concurrent_limit = config.get(
             "inflight_request_limit",
             ConcurrencyLimitedPushkin.DEFAULT_CONCURRENCY_LIMIT,
@@ -189,14 +226,14 @@ class ConcurrencyLimitedPushkin(Pushkin):
 
 
 class NotificationContext(object):
-    def __init__(self, request_id, opentracing_span, start_time):
+    def __init__(self, request_id: str, opentracing_span: Span, start_time: float):
         """
         Args:
-            request_id (str): An ID for the request, or None to have it
+            request_id: An ID for the request, or None to have it
                 generated automatically.
-            opentracing_span (Span): The span for the API request triggering
+            opentracing_span: The span for the API request triggering
                 the notification.
-            start_time (float): Start timer value, `time.perf_counter()`
+            start_time: Start timer value, `time.perf_counter()`
         """
         self.request_id = request_id
         self.opentracing_span = opentracing_span

@@ -18,24 +18,32 @@ import json
 import logging
 import time
 from io import BytesIO
+from typing import TYPE_CHECKING, Any, AnyStr, Dict, List, Optional, Tuple
 
-from opentracing import logs, tags
+from opentracing import Span, logs, tags
 from prometheus_client import Counter, Gauge, Histogram
-from twisted.enterprise.adbapi import ConnectionPool
 from twisted.internet.defer import DeferredSemaphore
 from twisted.web.client import FileBodyProducer, HTTPConnectionPool, readBody
 from twisted.web.http_headers import Headers
+from twisted.web.iweb import IResponse
 
 from sygnal.exceptions import (
     NotificationDispatchException,
+    PushkinSetupException,
     TemporaryNotificationDispatchException,
 )
 from sygnal.helper.context_factory import ClientTLSOptionsFactory
 from sygnal.helper.proxy.proxyagent_twisted import ProxyAgent
+from sygnal.notifications import (
+    ConcurrencyLimitedPushkin,
+    Device,
+    Notification,
+    NotificationContext,
+)
 from sygnal.utils import NotificationLoggerAdapter, json_decoder, twisted_sleep
 
-from .exceptions import PushkinSetupException
-from .notifications import ConcurrencyLimitedPushkin
+if TYPE_CHECKING:
+    from sygnal.sygnal import Sygnal
 
 QUEUE_TIME_HISTOGRAM = Histogram(
     "sygnal_gcm_queue_time", "Time taken waiting for a connection to GCM"
@@ -99,8 +107,8 @@ class GcmPushkin(ConcurrencyLimitedPushkin):
         "max_connections",
     } | ConcurrencyLimitedPushkin.UNDERSTOOD_CONFIG_FIELDS
 
-    def __init__(self, name, sygnal, config, canonical_reg_id_store):
-        super(GcmPushkin, self).__init__(name, sygnal, config)
+    def __init__(self, name: str, sygnal: "Sygnal", config: Dict[str, Any]) -> None:
+        super().__init__(name, sygnal, config)
 
         nonunderstood = set(self.cfg.keys()).difference(self.UNDERSTOOD_CONFIG_FIELDS)
         if len(nonunderstood) > 0:
@@ -111,8 +119,9 @@ class GcmPushkin(ConcurrencyLimitedPushkin):
 
         self.http_pool = HTTPConnectionPool(reactor=sygnal.reactor)
         self.max_connections = self.get_config(
-            "max_connections", DEFAULT_MAX_CONNECTIONS
+            "max_connections", int, DEFAULT_MAX_CONNECTIONS
         )
+
         self.connection_semaphore = DeferredSemaphore(self.max_connections)
         self.http_pool.maxPersistentPerHost = self.max_connections
 
@@ -128,24 +137,23 @@ class GcmPushkin(ConcurrencyLimitedPushkin):
             proxy_url_str=proxy_url,
         )
 
-        self.db = sygnal.database
-        self.canonical_reg_id_store = canonical_reg_id_store
-
-        self.api_key = self.get_config("api_key")
+        self.api_key = self.get_config("api_key", str)
         if not self.api_key:
             raise PushkinSetupException("No API key set in config")
 
         # Use the fcm_options config dictionary as a foundation for the body;
         # this lets the Sygnal admin choose custom FCM options
         # (e.g. content_available).
-        self.base_request_body: dict = self.get_config("fcm_options", {})
+        self.base_request_body = self.get_config("fcm_options", dict, {})
         if not isinstance(self.base_request_body, dict):
             raise PushkinSetupException(
                 "Config field fcm_options, if set, must be a dictionary of options"
             )
 
     @classmethod
-    async def create(cls, name, sygnal, config):
+    async def create(
+        cls, name: str, sygnal: "Sygnal", config: Dict[str, Any]
+    ) -> "GcmPushkin":
         """
         Override this if your pushkin needs to call async code in order to
         be constructed. Otherwise, it defaults to just invoking the Python-standard
@@ -154,22 +162,17 @@ class GcmPushkin(ConcurrencyLimitedPushkin):
         Returns:
             an instance of this Pushkin
         """
-        logger.debug("About to set up CanonicalRegId Store")
-        canonical_reg_id_store = CanonicalRegIdStore(
-            sygnal.database, sygnal.database_engine
-        )
-        await canonical_reg_id_store.setup()
-        logger.debug("Finished setting up CanonicalRegId Store")
+        return cls(name, sygnal, config)
 
-        return cls(name, sygnal, config, canonical_reg_id_store)
-
-    async def _perform_http_request(self, body, headers):
+    async def _perform_http_request(
+        self, body: Dict, headers: Dict[AnyStr, List[AnyStr]]
+    ) -> Tuple[IResponse, str]:
         """
         Perform an HTTP request to the FCM server with the body and headers
         specified.
         Args:
-            body (nested dict): Body. Will be JSON-encoded.
-            headers (Headers): HTTP Headers.
+            body: Body. Will be JSON-encoded.
+            headers: HTTP Headers.
 
         Returns:
 
@@ -201,7 +204,15 @@ class GcmPushkin(ConcurrencyLimitedPushkin):
             self.connection_semaphore.release()
         return response, response_text
 
-    async def _request_dispatch(self, n, log, body, headers, pushkeys, span):
+    async def _request_dispatch(
+        self,
+        n: Notification,
+        log: NotificationLoggerAdapter,
+        body: dict,
+        headers: Dict[AnyStr, List[AnyStr]],
+        pushkeys: List[str],
+        span: Span,
+    ) -> Tuple[List[str], List[str]]:
         poke_start_time = time.time()
 
         failed = []
@@ -276,11 +287,6 @@ class GcmPushkin(ConcurrencyLimitedPushkin):
             # determine which pushkeys to retry or forget about
             new_pushkeys = []
             for i, result in enumerate(resp_object["results"]):
-                span.set_tag("gcm_regid_updated", "registration_id" in result)
-                if "registration_id" in result:
-                    await self.canonical_reg_id_store.set_canonical_id(
-                        pushkeys[i], result["registration_id"]
-                    )
                 if "error" in result:
                     log.warning(
                         "Error for pushkey %s: %s", pushkeys[i], result["error"]
@@ -313,16 +319,24 @@ class GcmPushkin(ConcurrencyLimitedPushkin):
                 f"Unknown GCM response code {response.code}"
             )
 
-    async def _dispatch_notification_unlimited(self, n, device, context):
+    async def _dispatch_notification_unlimited(
+        self, n: Notification, device: Device, context: NotificationContext
+    ) -> List[str]:
         log = NotificationLoggerAdapter(logger, {"request_id": context.request_id})
 
+        # `_dispatch_notification_unlimited` gets called once for each device in the
+        # `Notification` with a matching app ID. We do something a little dirty and
+        # perform all of our dispatches the first time we get called for a
+        # `Notification` and do nothing for the rest of the times we get called.
         pushkeys = [
-            device.pushkey for device in n.devices if device.app_id == self.name
+            device.pushkey for device in n.devices if self.handles_appid(device.app_id)
         ]
-        # Resolve canonical IDs for all pushkeys
+        # `pushkeys` ought to never be empty here. At the very least it should contain
+        # `device`'s pushkey.
 
         if pushkeys[0] != device.pushkey:
-            # Only send notifications once, to all devices at once.
+            # We've already been asked to dispatch for this `Notification` and have
+            # previously sent out the notification to all devices.
             return []
 
         # The pushkey is kind of secret because you can use it to send push
@@ -333,46 +347,36 @@ class GcmPushkin(ConcurrencyLimitedPushkin):
         with self.sygnal.tracer.start_span(
             "gcm_dispatch", tags=span_tags, child_of=context.opentracing_span
         ) as span_parent:
-            reg_id_mappings = await self.canonical_reg_id_store.get_canonical_ids(
-                pushkeys
-            )
-
-            reg_id_mappings = {
-                reg_id: canonical_reg_id or reg_id
-                for (reg_id, canonical_reg_id) in reg_id_mappings.items()
-            }
-
-            inverse_reg_id_mappings = {v: k for (k, v) in reg_id_mappings.items()}
+            # TODO: Implement collapse_key to queue only one message per room.
+            failed: List[str] = []
 
             data = GcmPushkin._build_data(n, device)
+
+            # Reject pushkey(s) if default_payload is misconfigured
+            if data is None:
+                log.warning(
+                    "Rejecting pushkey(s) due to misconfigured default_payload, "
+                    "please ensure that default_payload is a dict."
+                )
+                return pushkeys
+
             headers = {
-                b"User-Agent": ["sygnal"],
-                b"Content-Type": ["application/json"],
-                b"Authorization": ["key=%s" % (self.api_key,)],
+                "User-Agent": ["sygnal"],
+                "Content-Type": ["application/json"],
+                "Authorization": ["key=%s" % (self.api_key,)],
             }
-
-            # count the number of remapped registration IDs in the request
-            span_parent.set_tag(
-                "gcm_num_remapped_reg_ids_used",
-                [k != v for (k, v) in reg_id_mappings.items()].count(True),
-            )
-
-            # TODO: Implement collapse_key to queue only one message per room.
-            failed = []
 
             body = self.base_request_body.copy()
             body["data"] = data
             body["priority"] = "normal" if n.prio == "low" else "high"
 
             for retry_number in range(0, MAX_TRIES):
-                mapped_pushkeys = [reg_id_mappings[pk] for pk in pushkeys]
-
                 if len(pushkeys) == 1:
-                    body["to"] = mapped_pushkeys[0]
+                    body["to"] = pushkeys[0]
                 else:
-                    body["registration_ids"] = mapped_pushkeys
+                    body["registration_ids"] = pushkeys
 
-                log.info("Sending (attempt %i) => %r", retry_number, mapped_pushkeys)
+                log.info("Sending (attempt %i) => %r", retry_number, pushkeys)
 
                 try:
                     span_tags = {"retry_num": retry_number}
@@ -381,17 +385,15 @@ class GcmPushkin(ConcurrencyLimitedPushkin):
                         "gcm_dispatch_try", tags=span_tags, child_of=span_parent
                     ) as span:
                         new_failed, new_pushkeys = await self._request_dispatch(
-                            n, log, body, headers, mapped_pushkeys, span
+                            n, log, body, headers, pushkeys, span
                         )
                     pushkeys = new_pushkeys
-                    failed += [
-                        inverse_reg_id_mappings[canonical_pk]
-                        for canonical_pk in new_failed
-                    ]
+                    failed += new_failed
+
                     if len(pushkeys) == 0:
                         break
                 except TemporaryNotificationDispatchException as exc:
-                    retry_delay = RETRY_DELAY_BASE * (2 ** retry_number)
+                    retry_delay = RETRY_DELAY_BASE * (2**retry_number)
                     if exc.custom_retry_delay is not None:
                         retry_delay = exc.custom_retry_delay
 
@@ -416,21 +418,28 @@ class GcmPushkin(ConcurrencyLimitedPushkin):
             return failed
 
     @staticmethod
-    def _build_data(n, device):
+    def _build_data(n: Notification, device: Device) -> Optional[Dict[str, Any]]:
         """
         Build the payload data to be sent.
         Args:
             n: Notification to build the payload for.
-            device (Device): Device information to which the constructed payload
+            device: Device information to which the constructed payload
             will be sent.
 
         Returns:
-            JSON-compatible dict
+            JSON-compatible dict or None if the default_payload is misconfigured
         """
         data = {}
 
         if device.data:
-            data.update(device.data.get("default_payload", {}))
+            default_payload = device.data.get("default_payload", {})
+            if isinstance(default_payload, dict):
+                data.update(default_payload)
+            else:
+                logger.warning(
+                    "default_payload was misconfigured, this value must be a dict."
+                )
+                return None
 
         for attr in [
             "event_id",
@@ -459,79 +468,3 @@ class GcmPushkin(ConcurrencyLimitedPushkin):
             data["missed_calls"] = n.counts.missed_calls
 
         return data
-
-
-class CanonicalRegIdStore(object):
-    TABLE_CREATE_QUERY = """
-        CREATE TABLE IF NOT EXISTS gcm_canonical_reg_id (
-            reg_id TEXT PRIMARY KEY,
-            canonical_reg_id TEXT NOT NULL
-        );
-        """
-
-    def __init__(self, db: ConnectionPool, engine: str):
-        """
-        Args:
-            db (adbapi.ConnectionPool): database to prepare
-            engine (str):
-                Database engine to use. Shoud be either "sqlite" or "postgresql".
-        """
-        self.db = db
-        self.engine = engine
-
-    async def setup(self):
-        """
-        Prepares, if necessary, the database for storing canonical registration IDs.
-
-        Separate method from the constructor because we wait for an async request
-        to complete, so it must be an `async def` method.
-        """
-        await self.db.runOperation(self.TABLE_CREATE_QUERY)
-
-    async def set_canonical_id(self, reg_id, canonical_reg_id):
-        """
-        Associates a GCM registration ID with a canonical registration ID.
-        Args:
-            reg_id (str): a registration ID
-            canonical_reg_id (str): the canonical registration ID for `reg_id`
-        """
-        if self.engine == "sqlite":
-            await self.db.runOperation(
-                "INSERT OR REPLACE INTO gcm_canonical_reg_id VALUES (?, ?);",
-                (reg_id, canonical_reg_id),
-            )
-        else:
-            await self.db.runOperation(
-                """
-                INSERT INTO gcm_canonical_reg_id VALUES (%s, %s)
-                ON CONFLICT (reg_id) DO UPDATE
-                    SET canonical_reg_id = EXCLUDED.canonical_reg_id;
-                """,
-                (reg_id, canonical_reg_id),
-            )
-
-    async def get_canonical_ids(self, reg_ids):
-        """
-        Retrieves the canonical registration ID for multiple registration IDs.
-
-        Args:
-            reg_ids (iterable): registration IDs to retrieve canonical registration
-                IDs for.
-
-        Returns (dict):
-            mapping of registration ID to either its canonical registration ID,
-            or `None` if there is no entry.
-        """
-        parameter_key = "?" if self.engine == "sqlite" else "%s"
-        rows = dict(
-            await self.db.runQuery(
-                """
-                SELECT reg_id, canonical_reg_id
-                FROM gcm_canonical_reg_id
-                WHERE reg_id IN (%s)
-                """
-                % (",".join(parameter_key for _ in reg_ids)),
-                reg_ids,
-            )
-        )
-        return {reg_id: dict(rows).get(reg_id) for reg_id in reg_ids}
