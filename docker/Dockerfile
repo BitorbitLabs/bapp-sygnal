@@ -19,8 +19,7 @@ RUN apt-get update && apt-get install -y git
 
 COPY . /sygnal/
 
-RUN pip install --prefix="/install" --no-warn-script-location /sygnal \
-    && pip install --prefix="/install" --no-warn-script-location aioapns==2.0.2
+RUN pip install --prefix="/install" --no-warn-script-location /sygnal
 
 ###
 ### Stage 1: runtime
