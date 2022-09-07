@@ -1,7 +1,7 @@
 name: Build-Deploy-Prod
 on:
   push:
-    branches: [develop]
+    branches: [master]
 
 env: 
   APP_NAME: bitorbit-sygnal
